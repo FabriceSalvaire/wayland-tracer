@@ -1,8 +1,0 @@
-# option('tracer,
-#   description: 'Compile wayland-tracer binary',
-#   type: 'boolean',
-#   value: true)
-# option('documentation',
-#   description: 'Build the documentation (requires Doxygen, dot, xmlto, xsltproc)',
-#   type: 'boolean',
-#   value: true)
