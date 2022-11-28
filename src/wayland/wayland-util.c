@@ -2,25 +2,29 @@
  * Copyright © 2008-2011 Kristian Høgsberg
  * Copyright © 2011 Intel Corporation
  *
- * Permission to use, copy, modify, distribute, and sell this software and its
- * documentation for any purpose is hereby granted without fee, provided that
- * the above copyright notice appear in all copies and that both that copyright
- * notice and this permission notice appear in supporting documentation, and
- * that the name of the copyright holders not be used in advertising or
- * publicity pertaining to distribution of the software without specific,
- * written prior permission.  The copyright holders make no representations
- * about the suitability of this software for any purpose.  It is provided "as
- * is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
- * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
- * EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY SPECIAL, INDIRECT OR
- * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
- * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
- * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
- * OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the
+ * next paragraph) shall be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 
+#include <errno.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -29,8 +33,6 @@
 
 #include "wayland-util.h"
 #include "wayland-private.h"
-
-struct wl_object global_zombie_object;
 
 WL_EXPORT void
 wl_list_init(struct wl_list *list)
@@ -101,6 +103,7 @@ WL_EXPORT void
 wl_array_release(struct wl_array *array)
 {
     free(array->data);
+    array->data = WL_ARRAY_POISON_PTR;
 }
 
 WL_EXPORT void *
@@ -124,12 +127,12 @@ wl_array_add(struct wl_array *array, size_t size)
             data = malloc(alloc);
 
         if (data == NULL)
-            return 0;
+            return NULL;
         array->data = data;
         array->alloc = alloc;
     }
 
-    p = array->data + array->size;
+    p = (char *) array->data + array->size;
     array->size += size;
 
     return p;
@@ -146,8 +149,25 @@ wl_array_copy(struct wl_array *array, struct wl_array *source)
         array->size = source->size;
     }
 
-    memcpy(array->data, source->data, source->size);
+    if (source->size > 0)
+        memcpy(array->data, source->data, source->size);
+
     return 0;
+}
+
+/** \cond */
+
+int
+wl_interface_equal(const struct wl_interface *a, const struct wl_interface *b)
+{
+    /* In most cases the pointer equality test is sufficient.
+     * However, in some cases, depending on how things are split
+     * across shared objects, we can end up with multiple
+     * instances of the interface metadata constants.  So if the
+     * pointers match, the interfaces are equal, if they don't
+     * match we have to compare the interface names.
+     */
+    return a == b || strcmp(a->name, b->name) == 0;
 }
 
 union map_entry
@@ -160,26 +180,27 @@ union map_entry
 #define map_entry_get_data(entry) ((void *)((entry).next & ~(uintptr_t)0x3))
 #define map_entry_get_flags(entry) (((entry).next >> 1) & 0x1)
 
-WL_EXPORT void
+void
 wl_map_init(struct wl_map *map, uint32_t side)
 {
     memset(map, 0, sizeof *map);
     map->side = side;
 }
 
-WL_EXPORT void
+void
 wl_map_release(struct wl_map *map)
 {
     wl_array_release(&map->client_entries);
     wl_array_release(&map->server_entries);
 }
 
-WL_EXPORT uint32_t
+uint32_t
 wl_map_insert_new(struct wl_map *map, uint32_t flags, void *data)
 {
     union map_entry *start, *entry;
     struct wl_array *entries;
     uint32_t base;
+    uint32_t count;
 
     if (map->side == WL_MAP_CLIENT_SIDE) {
         entries = &map->client_entries;
@@ -202,13 +223,29 @@ wl_map_insert_new(struct wl_map *map, uint32_t flags, void *data)
         start = entries->data;
     }
 
+    /* wl_array only grows, so if we have too many objects at
+     * this point there's no way to clean up. We could be more
+     * pro-active about trying to avoid this allocation, but
+     * it doesn't really matter because at this point there is
+     * nothing to be done but disconnect the client and delete
+     * the whole array either way.
+     */
+    count = entry - start;
+    if (count > WL_MAP_MAX_OBJECTS) {
+        /* entry->data is freshly malloced garbage, so we'd
+         * better make it a NULL so wl_map_for_each doesn't
+         * dereference it later. */
+        entry->data = NULL;
+        errno = ENOSPC;
+        return 0;
+    }
     entry->data = data;
     entry->next |= (flags & 0x1) << 1;
 
-    return (entry - start) + base;
+    return count + base;
 }
 
-WL_EXPORT int
+int
 wl_map_insert_at(struct wl_map *map, uint32_t flags, uint32_t i, void *data)
 {
     union map_entry *start;
@@ -223,12 +260,21 @@ wl_map_insert_at(struct wl_map *map, uint32_t flags, uint32_t i, void *data)
         i -= WL_SERVER_ID_START;
     }
 
-    count = entries->size / sizeof *start;
-    if (count < i)
+    if (i > WL_MAP_MAX_OBJECTS) {
+        errno = ENOSPC;
         return -1;
+    }
 
-    if (count == i)
-        wl_array_add(entries, sizeof *start);
+    count = entries->size / sizeof *start;
+    if (count < i) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (count == i) {
+        if (!wl_array_add(entries, sizeof *start))
+            return -1;
+    }
 
     start = entries->data;
     start[i].data = data;
@@ -237,7 +283,7 @@ wl_map_insert_at(struct wl_map *map, uint32_t flags, uint32_t i, void *data)
     return 0;
 }
 
-WL_EXPORT int
+int
 wl_map_reserve_new(struct wl_map *map, uint32_t i)
 {
     union map_entry *start;
@@ -245,32 +291,45 @@ wl_map_reserve_new(struct wl_map *map, uint32_t i)
     struct wl_array *entries;
 
     if (i < WL_SERVER_ID_START) {
-        if (map->side == WL_MAP_CLIENT_SIDE)
+        if (map->side == WL_MAP_CLIENT_SIDE) {
+            errno = EINVAL;
             return -1;
+        }
 
         entries = &map->client_entries;
     }
     else {
-        if (map->side == WL_MAP_SERVER_SIDE)
+        if (map->side == WL_MAP_SERVER_SIDE) {
+            errno = EINVAL;
             return -1;
+        }
 
         entries = &map->server_entries;
         i -= WL_SERVER_ID_START;
     }
 
-    count = entries->size / sizeof *start;
-
-    if (count < i)
+    if (i > WL_MAP_MAX_OBJECTS) {
+        errno = ENOSPC;
         return -1;
+    }
+
+    count = entries->size / sizeof *start;
+    if (count < i) {
+        errno = EINVAL;
+        return -1;
+    }
 
     if (count == i) {
-        wl_array_add(entries, sizeof *start);
+        if (!wl_array_add(entries, sizeof *start))
+            return -1;
+
         start = entries->data;
         start[i].data = NULL;
     }
     else {
         start = entries->data;
         if (start[i].data != NULL) {
+            errno = EINVAL;
             return -1;
         }
     }
@@ -278,7 +337,7 @@ wl_map_reserve_new(struct wl_map *map, uint32_t i)
     return 0;
 }
 
-WL_EXPORT void
+void
 wl_map_remove(struct wl_map *map, uint32_t i)
 {
     union map_entry *start;
@@ -303,7 +362,7 @@ wl_map_remove(struct wl_map *map, uint32_t i)
     map->free_list = (i << 1) | 1;
 }
 
-WL_EXPORT void *
+void *
 wl_map_lookup(struct wl_map *map, uint32_t i)
 {
     union map_entry *start;
@@ -327,7 +386,7 @@ wl_map_lookup(struct wl_map *map, uint32_t i)
     return NULL;
 }
 
-WL_EXPORT uint32_t
+uint32_t
 wl_map_lookup_flags(struct wl_map *map, uint32_t i)
 {
     union map_entry *start;
@@ -351,24 +410,36 @@ wl_map_lookup_flags(struct wl_map *map, uint32_t i)
     return 0;
 }
 
-static void
+static enum wl_iterator_result
 for_each_helper(struct wl_array *entries, wl_iterator_func_t func, void *data)
 {
-    union map_entry *start, *end, *p;
+    enum wl_iterator_result ret = WL_ITERATOR_CONTINUE;
+    union map_entry entry, *start;
+    size_t count;
 
-    start = entries->data;
-    end = (union map_entry *) ((char *) entries->data + entries->size);
+    start = (union map_entry *) entries->data;
+    count = entries->size / sizeof(union map_entry);
 
-    for (p = start; p < end; p++)
-        if (p->data && !map_entry_is_free(*p))
-            func(map_entry_get_data(*p), data);
+    for (size_t idx = 0; idx < count; idx++) {
+        entry = start[idx];
+        if (entry.data && !map_entry_is_free(entry)) {
+            ret = func(map_entry_get_data(entry), data, map_entry_get_flags(entry));
+            if (ret != WL_ITERATOR_CONTINUE)
+                break;
+        }
+    }
+
+    return ret;
 }
 
-WL_EXPORT void
+void
 wl_map_for_each(struct wl_map *map, wl_iterator_func_t func, void *data)
 {
-    for_each_helper(&map->client_entries, func, data);
-    for_each_helper(&map->server_entries, func, data);
+    enum wl_iterator_result ret;
+
+    ret = for_each_helper(&map->client_entries, func, data);
+    if (ret == WL_ITERATOR_CONTINUE)
+        for_each_helper(&map->server_entries, func, data);
 }
 
 static void
@@ -388,3 +459,17 @@ wl_log(const char *fmt, ...)
     wl_log_handler(fmt, argp);
     va_end(argp);
 }
+
+void
+wl_abort(const char *fmt, ...)
+{
+    va_list argp;
+
+    va_start(argp, fmt);
+    wl_log_handler(fmt, argp);
+    va_end(argp);
+
+    abort();
+}
+
+/** \endcond */

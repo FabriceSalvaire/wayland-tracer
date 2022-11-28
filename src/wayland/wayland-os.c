@@ -1,35 +1,45 @@
 /*
  * Copyright © 2012 Collabora, Ltd.
  *
- * Permission to use, copy, modify, distribute, and sell this software and its
- * documentation for any purpose is hereby granted without fee, provided that
- * the above copyright notice appear in all copies and that both that copyright
- * notice and this permission notice appear in supporting documentation, and
- * that the name of the copyright holders not be used in advertising or
- * publicity pertaining to distribution of the software without specific,
- * written prior permission.  The copyright holders make no representations
- * about the suitability of this software for any purpose.  It is provided "as
- * is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
- * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
- * EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY SPECIAL, INDIRECT OR
- * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
- * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
- * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
- * OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the
+ * next paragraph) shall be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 
 #define _GNU_SOURCE
+
+// #include "../config.h"
 
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <string.h>
 #include <sys/epoll.h>
+#include <sys/mman.h>
+#include <sys/un.h>
+#ifdef HAVE_SYS_UCRED_H
+#include <sys/ucred.h>
+#endif
 
-// #include "../config.h"
 #include "wayland-os.h"
 
 static int
@@ -69,8 +79,48 @@ wl_os_socket_cloexec(int domain, int type, int protocol)
     return set_cloexec_or_close(fd);
 }
 
+#if defined(__FreeBSD__)
 int
-wl_os_dupfd_cloexec(int fd, long minfd)
+wl_os_socket_peercred(int sockfd, uid_t * uid, gid_t * gid, pid_t * pid)
+{
+    socklen_t len;
+    struct xucred ucred;
+
+    len = sizeof(ucred);
+    if (getsockopt(sockfd, SOL_LOCAL, LOCAL_PEERCRED, &ucred, &len) < 0 ||
+        ucred.cr_version != XUCRED_VERSION)
+        return -1;
+    *uid = ucred.cr_uid;
+    *gid = ucred.cr_gid;
+#if HAVE_XUCRED_CR_PID
+    /* Since https://cgit.freebsd.org/src/commit/?id=c5afec6e895a */
+    *pid = ucred.cr_pid;
+#else
+    *pid = 0;
+#endif
+    return 0;
+}
+#elif defined(SO_PEERCRED)
+int
+wl_os_socket_peercred(int sockfd, uid_t * uid, gid_t * gid, pid_t * pid)
+{
+    socklen_t len;
+    struct ucred ucred;
+
+    len = sizeof(ucred);
+    if (getsockopt(sockfd, SOL_SOCKET, SO_PEERCRED, &ucred, &len) < 0)
+        return -1;
+    *uid = ucred.uid;
+    *gid = ucred.gid;
+    *pid = ucred.pid;
+    return 0;
+}
+#else
+#error "Don't know how to read ucred on this platform"
+#endif
+
+int
+wl_os_dupfd_cloexec(int fd, int minfd)
 {
     int newfd;
 
@@ -117,6 +167,15 @@ recvmsg_cloexec_fallback(int sockfd, struct msghdr *msg, int flags)
 ssize_t
 wl_os_recvmsg_cloexec(int sockfd, struct msghdr *msg, int flags)
 {
+#if HAVE_BROKEN_MSG_CMSG_CLOEXEC
+    /*
+     * FreeBSD had a broken implementation of MSG_CMSG_CLOEXEC between 2015
+     * and 2021, so we have to use the non-MSG_CMSG_CLOEXEC fallback
+     * directly when compiling against a version that does not include the
+     * fix (https://cgit.freebsd.org/src/commit/?id=6ceacebdf52211).
+     */
+#pragma message("Using fallback directly since MSG_CMSG_CLOEXEC is broken.")
+#else
     ssize_t len;
 
     len = recvmsg(sockfd, msg, flags | MSG_CMSG_CLOEXEC);
@@ -124,7 +183,7 @@ wl_os_recvmsg_cloexec(int sockfd, struct msghdr *msg, int flags)
         return len;
     if (errno != EINVAL)
         return -1;
-
+#endif
     return recvmsg_cloexec_fallback(sockfd, msg, flags);
 }
 
@@ -160,4 +219,33 @@ wl_os_accept_cloexec(int sockfd, struct sockaddr *addr, socklen_t * addrlen)
 
     fd = accept(sockfd, addr, addrlen);
     return set_cloexec_or_close(fd);
+}
+
+/*
+ * Fallback function for operating systems that don't implement
+ * mremap(MREMAP_MAYMOVE).
+ */
+void *
+wl_os_mremap_maymove(int fd, void *old_data, ssize_t * old_size,
+                     ssize_t new_size, int prot, int flags)
+{
+    void *result;
+
+    /* Make sure any pending write is flushed. */
+    if (msync(old_data, *old_size, MS_SYNC) != 0)
+        return MAP_FAILED;
+
+    /* We could try mapping a new block immediately after the current one
+     * with MAP_FIXED, however that is not guaranteed to work and breaks
+     * on CHERI-enabled architectures since the data pointer will still
+     * have the bounds of the previous allocation.
+     */
+    result = mmap(NULL, new_size, prot, flags, fd, 0);
+    if (result == MAP_FAILED)
+        return MAP_FAILED;
+
+    if (munmap(old_data, *old_size) == 0)
+        *old_size = 0;
+
+    return result;
 }
