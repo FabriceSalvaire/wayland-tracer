@@ -29,7 +29,7 @@
 #include <errno.h>
 #include <sys/epoll.h>
 
-#include "../config.h"
+// #include "../config.h"
 #include "wayland-os.h"
 
 static int
