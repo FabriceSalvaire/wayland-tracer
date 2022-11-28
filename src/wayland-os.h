@@ -23,20 +23,15 @@
 #ifndef WAYLAND_OS_H
 #define WAYLAND_OS_H
 
-int
-wl_os_socket_cloexec(int domain, int type, int protocol);
+int wl_os_socket_cloexec(int domain, int type, int protocol);
 
-int
-wl_os_dupfd_cloexec(int fd, long minfd);
+int wl_os_dupfd_cloexec(int fd, long minfd);
 
-ssize_t
-wl_os_recvmsg_cloexec(int sockfd, struct msghdr *msg, int flags);
+ssize_t wl_os_recvmsg_cloexec(int sockfd, struct msghdr *msg, int flags);
 
-int
-wl_os_epoll_create_cloexec(void);
+int wl_os_epoll_create_cloexec(void);
 
-int
-wl_os_accept_cloexec(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+int wl_os_accept_cloexec(int sockfd, struct sockaddr *addr, socklen_t * addrlen);
 
 
 /*

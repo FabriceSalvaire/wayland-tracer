@@ -27,55 +27,54 @@
 static int
 bin_init(struct tracer *tracer)
 {
-	return 0;
+    return 0;
 }
 
 static int
 bin_handle_data(struct tracer_connection *connection, int rlen)
 {
-	int i, len, fdlen, fd;
-	char buf[4096];
-	struct wl_connection *wl_conn= connection->wl_conn;
-	struct tracer_connection *peer = connection->peer;
-	struct tracer_instance *instance = connection->instance;
-	struct tracer *tracer = instance->tracer;
+    int i, len, fdlen, fd;
+    char buf[4096];
+    struct wl_connection *wl_conn = connection->wl_conn;
+    struct tracer_connection *peer = connection->peer;
+    struct tracer_instance *instance = connection->instance;
+    struct tracer *tracer = instance->tracer;
 
-	len = wl_buffer_size(&wl_conn->in);
-	if (len == 0)
-		return 0;
+    len = wl_buffer_size(&wl_conn->in);
+    if (len == 0)
+        return 0;
 
-	wl_connection_copy(wl_conn, buf, len);
+    wl_connection_copy(wl_conn, buf, len);
 
-	tracer_log("%s Data dumped: %d bytes:\n",
-	           connection->side == TRACER_SERVER_SIDE ? "=>" : "<=",
-		   len);
-	for (i = 0; i < len; i++)
-		tracer_log_cont("%02x ", (unsigned char)buf[i]);
-	tracer_log_cont("\n");
-	wl_connection_consume(wl_conn, len);
-	wl_connection_write(peer->wl_conn, buf, len);
+    tracer_log("%s Data dumped: %d bytes:\n",
+               connection->side == TRACER_SERVER_SIDE ? "=>" : "<=", len);
+    for (i = 0; i < len; i++)
+        tracer_log_cont("%02x ", (unsigned char) buf[i]);
+    tracer_log_cont("\n");
+    wl_connection_consume(wl_conn, len);
+    wl_connection_write(peer->wl_conn, buf, len);
 
-	fdlen = wl_buffer_size(&wl_conn->fds_in);
+    fdlen = wl_buffer_size(&wl_conn->fds_in);
 
-	wl_buffer_copy(&wl_conn->fds_in, buf, fdlen);
-	fdlen /= sizeof(int32_t);
+    wl_buffer_copy(&wl_conn->fds_in, buf, fdlen);
+    fdlen /= sizeof(int32_t);
 
-	if (fdlen != 0)
-		tracer_log_cont("%d Fds in control data:", fdlen);
+    if (fdlen != 0)
+        tracer_log_cont("%d Fds in control data:", fdlen);
 
-	for (i = 0; i < fdlen; i++) {
-		fd = ((int *) buf)[i];
-		tracer_log_cont("%d ", fd);
-		wl_connection_put_fd(peer->wl_conn, fd);
-	}
-	tracer_log_end();
+    for (i = 0; i < fdlen; i++) {
+        fd = ((int *) buf)[i];
+        tracer_log_cont("%d ", fd);
+        wl_connection_put_fd(peer->wl_conn, fd);
+    }
+    tracer_log_end();
 
-	wl_conn->fds_in.tail += fdlen * sizeof(int32_t);
+    wl_conn->fds_in.tail += fdlen * sizeof(int32_t);
 
-	return len;
+    return len;
 }
 
 struct tracer_frontend_interface tracer_frontend_bin = {
-	.init = bin_init,
-	.data = bin_handle_data
+    .init = bin_init,
+    .data = bin_handle_data
 };

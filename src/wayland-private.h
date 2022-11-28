@@ -42,10 +42,11 @@
 #define WL_SERVER_ID_START 0xff000000
 #define WL_CLOSURE_MAX_ARGS 20
 
-struct wl_object {
-	const struct wl_interface *interface;
-	const void *implementation;
-	uint32_t id;
+struct wl_object
+{
+    const struct wl_interface *interface;
+    const void *implementation;
+    uint32_t id;
 };
 
 extern struct wl_object global_zombie_object;
@@ -55,15 +56,17 @@ extern struct wl_object global_zombie_object;
  * wl_map_lookup_flags.  The current implementation has room for 1 bit worth of
  * flags.  If more flags are ever added, the implementation of wl_map will have
  * to change to allow for new flags */
-enum wl_map_entry_flags {
-	WL_MAP_ENTRY_LEGACY = (1 << 0)
+enum wl_map_entry_flags
+{
+    WL_MAP_ENTRY_LEGACY = (1 << 0)
 };
 
-struct wl_map {
-	struct wl_array client_entries;
-	struct wl_array server_entries;
-	uint32_t side;
-	uint32_t free_list;
+struct wl_map
+{
+    struct wl_array client_entries;
+    struct wl_array server_entries;
+    uint32_t side;
+    uint32_t free_list;
 };
 
 typedef void (*wl_iterator_func_t)(void *element, void *data);
@@ -79,23 +82,24 @@ uint32_t wl_map_lookup_flags(struct wl_map *map, uint32_t i);
 void wl_map_for_each(struct wl_map *map, wl_iterator_func_t func, void *data);
 
 
-struct wl_buffer {
-	char data[4096];
-	uint32_t head, tail;
+struct wl_buffer
+{
+    char data[4096];
+    uint32_t head, tail;
 };
 
-struct wl_connection {
-	struct wl_buffer in, out;
-	struct wl_buffer fds_in, fds_out;
-	int fd;
-	int want_flush;
+struct wl_connection
+{
+    struct wl_buffer in, out;
+    struct wl_buffer fds_in, fds_out;
+    int fd;
+    int want_flush;
 };
 
 struct wl_closure;
 struct wl_proxy;
 
-int wl_interface_equal(const struct wl_interface *iface1,
-		       const struct wl_interface *iface2);
+int wl_interface_equal(const struct wl_interface *iface1, const struct wl_interface *iface2);
 
 void wl_buffer_copy(struct wl_buffer *b, void *data, size_t count);
 uint32_t wl_buffer_size(struct wl_buffer *b);
@@ -109,76 +113,66 @@ int wl_connection_flush(struct wl_connection *connection);
 int wl_connection_read(struct wl_connection *connection);
 
 int wl_connection_write(struct wl_connection *connection, const void *data, size_t count);
-int wl_connection_queue(struct wl_connection *connection,
-			const void *data, size_t count);
+int wl_connection_queue(struct wl_connection *connection, const void *data, size_t count);
 int wl_connection_put_fd(struct wl_connection *connection, int32_t fd);
 
-struct wl_closure {
-	int count;
-	const struct wl_message *message;
-	uint32_t opcode;
-	uint32_t sender_id;
-	union wl_argument args[WL_CLOSURE_MAX_ARGS];
-	struct wl_list link;
-	struct wl_proxy *proxy;
-	struct wl_array extra[0];
+struct wl_closure
+{
+    int count;
+    const struct wl_message *message;
+    uint32_t opcode;
+    uint32_t sender_id;
+    union wl_argument args[WL_CLOSURE_MAX_ARGS];
+    struct wl_list link;
+    struct wl_proxy *proxy;
+    struct wl_array extra[0];
 };
 
-struct argument_details {
-	char type;
-	int nullable;
+struct argument_details
+{
+    char type;
+    int nullable;
 };
 
-const char *
-get_next_argument(const char *signature, struct argument_details *details);
+const char *get_next_argument(const char *signature, struct argument_details *details);
 
-int
-arg_count_for_signature(const char *signature);
+int arg_count_for_signature(const char *signature);
 
-int
-wl_message_get_since(const struct wl_message *message);
+int wl_message_get_since(const struct wl_message *message);
 
 void
-wl_argument_from_va_list(const char *signature, union wl_argument *args,
-			 int count, va_list ap);
+wl_argument_from_va_list(const char *signature, union wl_argument *args, int count, va_list ap);
 
-struct wl_closure *
-wl_closure_marshal(struct wl_object *sender,
-		    uint32_t opcode, union wl_argument *args,
-		    const struct wl_message *message);
-struct wl_closure *
-wl_closure_vmarshal(struct wl_object *sender,
-		    uint32_t opcode, va_list ap,
-		    const struct wl_message *message);
+struct wl_closure *wl_closure_marshal(struct wl_object *sender,
+                                      uint32_t opcode, union wl_argument *args,
+                                      const struct wl_message *message);
+struct wl_closure *wl_closure_vmarshal(struct wl_object *sender,
+                                       uint32_t opcode, va_list ap,
+                                       const struct wl_message *message);
 
-struct wl_closure *
-wl_connection_demarshal(struct wl_connection *connection,
-			uint32_t size,
-			struct wl_map *objects,
-			const struct wl_message *message);
+struct wl_closure *wl_connection_demarshal(struct wl_connection *connection,
+                                           uint32_t size,
+                                           struct wl_map *objects,
+                                           const struct wl_message *message);
 
-int
-wl_closure_lookup_objects(struct wl_closure *closure, struct wl_map *objects);
+int wl_closure_lookup_objects(struct wl_closure *closure, struct wl_map *objects);
 
-enum wl_closure_invoke_flag {
-	WL_CLOSURE_INVOKE_CLIENT = (1 << 0),
-	WL_CLOSURE_INVOKE_SERVER = (1 << 1)
+enum wl_closure_invoke_flag
+{
+    WL_CLOSURE_INVOKE_CLIENT = (1 << 0),
+    WL_CLOSURE_INVOKE_SERVER = (1 << 1)
 };
 
 void
 wl_closure_invoke(struct wl_closure *closure, uint32_t flags,
-		  struct wl_object *target, uint32_t opcode, void *data);
+                  struct wl_object *target, uint32_t opcode, void *data);
 void
 wl_closure_dispatch(struct wl_closure *closure, wl_dispatcher_func_t dispatcher,
-		    struct wl_object *target, uint32_t opcode);
-int
-wl_closure_send(struct wl_closure *closure, struct wl_connection *connection);
-int
-wl_closure_queue(struct wl_closure *closure, struct wl_connection *connection);
-void
-wl_closure_print(struct wl_closure *closure, struct wl_object *target, int send);
-void
-wl_closure_destroy(struct wl_closure *closure);
+                    struct wl_object *target, uint32_t opcode);
+int wl_closure_send(struct wl_closure *closure, struct wl_connection *connection);
+int wl_closure_queue(struct wl_closure *closure, struct wl_connection *connection);
+void wl_closure_print(struct wl_closure *closure, struct wl_object *target, int send);
+void wl_closure_destroy(struct wl_closure *closure);
 
 extern wl_log_func_t wl_log_handler;
 
@@ -186,7 +180,6 @@ void wl_log(const char *fmt, ...);
 
 struct wl_display;
 
-struct wl_array *
-wl_display_get_additional_shm_formats(struct wl_display *display);
+struct wl_array *wl_display_get_additional_shm_formats(struct wl_display *display);
 
 #endif

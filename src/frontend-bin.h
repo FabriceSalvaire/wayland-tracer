@@ -30,7 +30,7 @@ extern "C"
 {
 #endif
 
-extern struct tracer_frontend_interface tracer_frontend_bin;
+    extern struct tracer_frontend_interface tracer_frontend_bin;
 
 #ifdef __cplusplus
 }

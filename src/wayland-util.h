@@ -29,7 +29,8 @@
 #define WAYLAND_UTIL_H
 
 #ifdef  __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 #include <math.h>
@@ -58,20 +59,22 @@ extern "C" {
 #define WL_PRINTF(x, y)
 #endif
 
-struct wl_message {
-	const char *name;
-	const char *signature;
-	const struct wl_interface **types;
-};
+    struct wl_message
+    {
+        const char *name;
+        const char *signature;
+        const struct wl_interface **types;
+    };
 
-struct wl_interface {
-	const char *name;
-	int version;
-	int method_count;
-	const struct wl_message *methods;
-	int event_count;
-	const struct wl_message *events;
-};
+    struct wl_interface
+    {
+        const char *name;
+        int version;
+        int method_count;
+        const struct wl_message *methods;
+        int event_count;
+        const struct wl_message *events;
+    };
 
 /** \class wl_list
  *
@@ -111,17 +114,18 @@ struct wl_interface {
  *		Do_something_with_item(item);
  *	}
  */
-struct wl_list {
-	struct wl_list *prev;
-	struct wl_list *next;
-};
+    struct wl_list
+    {
+        struct wl_list *prev;
+        struct wl_list *next;
+    };
 
-void wl_list_init(struct wl_list *list);
-void wl_list_insert(struct wl_list *list, struct wl_list *elm);
-void wl_list_remove(struct wl_list *elm);
-int wl_list_length(const struct wl_list *list);
-int wl_list_empty(const struct wl_list *list);
-void wl_list_insert_list(struct wl_list *list, struct wl_list *other);
+    void wl_list_init(struct wl_list *list);
+    void wl_list_insert(struct wl_list *list, struct wl_list *elm);
+    void wl_list_remove(struct wl_list *elm);
+    int wl_list_length(const struct wl_list *list);
+    int wl_list_empty(const struct wl_list *list);
+    void wl_list_insert_list(struct wl_list *list, struct wl_list *other);
 
 /**
  * Retrieves a pointer to the containing struct of a given member item.
@@ -190,58 +194,59 @@ void wl_list_insert_list(struct wl_list *list, struct wl_list *other);
 	     pos = tmp,							\
 	     tmp = wl_container_of(pos->member.prev, tmp, member))
 
-struct wl_array {
-	size_t size;
-	size_t alloc;
-	void *data;
-};
+    struct wl_array
+    {
+        size_t size;
+        size_t alloc;
+        void *data;
+    };
 
 #define wl_array_for_each(pos, array)					\
 	for (pos = (array)->data;					\
 	     (const char *) pos < ((const char *) (array)->data + (array)->size); \
 	     (pos)++)
 
-void wl_array_init(struct wl_array *array);
-void wl_array_release(struct wl_array *array);
-void *wl_array_add(struct wl_array *array, size_t size);
-int wl_array_copy(struct wl_array *array, struct wl_array *source);
+    void wl_array_init(struct wl_array *array);
+    void wl_array_release(struct wl_array *array);
+    void *wl_array_add(struct wl_array *array, size_t size);
+    int wl_array_copy(struct wl_array *array, struct wl_array *source);
 
-typedef int32_t wl_fixed_t;
+    typedef int32_t wl_fixed_t;
 
-static inline double
-wl_fixed_to_double (wl_fixed_t f)
-{
-	union {
-		double d;
-		int64_t i;
-	} u;
+    static inline double wl_fixed_to_double(wl_fixed_t f)
+    {
+        union
+        {
+            double d;
+            int64_t i;
+        } u;
 
-	u.i = ((1023LL + 44LL) << 52) + (1LL << 51) + f;
+          u.i = ((1023LL + 44LL) << 52) + (1LL << 51) + f;
 
-	return u.d - (3LL << 43);
-}
+          return u.d - (3LL << 43);
+    }
 
-static inline wl_fixed_t
-wl_fixed_from_double(double d)
-{
-	union {
-		double d;
-		int64_t i;
-	} u;
+    static inline wl_fixed_t wl_fixed_from_double(double d)
+    {
+        union
+        {
+            double d;
+            int64_t i;
+        } u;
 
-	u.d = d + (3LL << (51 - 8));
+        u.d = d + (3LL << (51 - 8));
 
-	return u.i;
-}
+        return u.i;
+    }
 
-static inline int wl_fixed_to_int(wl_fixed_t f)
-{
-	return f / 256;
-}
-static inline wl_fixed_t wl_fixed_from_int(int i)
-{
-	return i * 256;
-}
+    static inline int wl_fixed_to_int(wl_fixed_t f)
+    {
+        return f / 256;
+    }
+    static inline wl_fixed_t wl_fixed_from_int(int i)
+    {
+        return i * 256;
+    }
 
 /**
  * \brief A union representing all of the basic data types that can be passed
@@ -251,16 +256,17 @@ static inline wl_fixed_t wl_fixed_from_int(int i)
  * wayland wire format.  It is used by dispatchers and runtime-friendly
  * versions of the event and request marshaling functions.
  */
-union wl_argument {
-	int32_t i; /**< signed integer */
-	uint32_t u; /**< unsigned integer */
-	wl_fixed_t f; /**< fixed point */
-	const char *s; /**< string */
-	struct wl_object *o; /**< object */
-	uint32_t n; /**< new_id */
-	struct wl_array *a; /**< array */
-	int32_t h; /**< file descriptor */
-};
+    union wl_argument
+    {
+        int32_t i; /**< signed integer */
+        uint32_t u; /**< unsigned integer */
+        wl_fixed_t f; /**< fixed point */
+        const char *s; /**< string */
+        struct wl_object *o; /**< object */
+        uint32_t n; /**< new_id */
+        struct wl_array *a; /**< array */
+        int32_t h; /**< file descriptor */
+    };
 
 /**
  * \brief A function pointer type for a dispatcher.
@@ -279,11 +285,10 @@ union wl_argument {
  * is an array of arguments recieved from the other process via the wire
  * protocol.
  */
-typedef int (*wl_dispatcher_func_t)(const void *, void *, uint32_t,
-				    const struct wl_message *,
-				    union wl_argument *);
+    typedef int (*wl_dispatcher_func_t)(const void *, void *, uint32_t,
+                                        const struct wl_message *, union wl_argument *);
 
-typedef void (*wl_log_func_t)(const char *, va_list) WL_PRINTF(1, 0);
+    typedef void (*wl_log_func_t)(const char *, va_list) WL_PRINTF(1, 0);
 
 #ifdef  __cplusplus
 }
