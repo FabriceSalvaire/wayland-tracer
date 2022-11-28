@@ -132,7 +132,7 @@ analyze_protocol(struct tracer_connection *connection,
             p = p + DIV_ROUNDUP(length, sizeof *p);
             break;
         case 'h':
-            wl_buffer_copy(&connection->wl_conn->fds_in, &fd, sizeof fd);
+            ring_buffer_copy(&connection->wl_conn->fds_in, &fd, sizeof fd);
             connection->wl_conn->fds_in.tail += sizeof fd;
             tracer_log_cont("fd %d", fd);
             wl_connection_put_fd(peer->wl_conn, fd);

@@ -40,7 +40,7 @@ bin_handle_data(struct tracer_connection *connection, int rlen)
     struct tracer_instance *instance = connection->instance;
     struct tracer *tracer = instance->tracer;
 
-    len = wl_buffer_size(&wl_conn->in);
+    len = ring_buffer_size(&wl_conn->in);
     if (len == 0)
         return 0;
 
@@ -54,9 +54,9 @@ bin_handle_data(struct tracer_connection *connection, int rlen)
     wl_connection_consume(wl_conn, len);
     wl_connection_write(peer->wl_conn, buf, len);
 
-    fdlen = wl_buffer_size(&wl_conn->fds_in);
+    fdlen = ring_buffer_size(&wl_conn->fds_in);
 
-    wl_buffer_copy(&wl_conn->fds_in, buf, fdlen);
+    ring_buffer_copy(&wl_conn->fds_in, buf, fdlen);
     fdlen /= sizeof(int32_t);
 
     if (fdlen != 0)
