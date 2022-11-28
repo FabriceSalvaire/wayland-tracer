@@ -2,14 +2,21 @@
 
 Forked from https://github.com/dboyan/wayland-tracer Boyan Ding, 2014
 
-* replaced Autotools by CMake
+* upgraded Wayland source files
+* replaced Autotools by Meson
+* updated this readme
 
 ## What is wayland-tracer
 
-wayland-tracer is a protocol dumper for Wayland. It can be used to trace what's on the wire between
-the compositor and client, which can be useful for debugging and is superior to WAYLAND_DEBUG in
-some aspects. It can dump raw binary data or interpret data to readable format if XML protocol
-definitions are provided.
+**wayland-tracer** is a protocol dumper for **Wayland**. It can be used to trace what's on the wire
+between the compositor and client, which can be useful for debugging. **It can dump raw binary
+data** or interpret data to readable format if XML protocol definitions are provided.
+
+**WARNING: the readable mode similar to WAYLAND_DEBUG=1 requires up to date XML...**
+
+**Notice:** for this use case, [wayland-debug](https://github.com/wmww/wayland-debug) is a better
+alternative that features a CLI for viewing, filtering, and setting breakpoints on Wayland protocol
+messages.
 
 ## Building wayland-tracer
 
