@@ -12,7 +12,8 @@ Forked from https://github.com/dboyan/wayland-tracer Boyan Ding, 2014
 between the compositor and client, which can be useful for debugging. **It can dump raw binary
 data** or interpret data to readable format if XML protocol definitions are provided.
 
-**WARNING: the readable mode similar to WAYLAND_DEBUG=1 requires up to date XML...**
+**WARNING: the readable mode similar to WAYLAND_DEBUG=1 requires up to date XML...** See this
+[issue](https://github.com/dboyan/wayland-tracer/issues/1)
 
 **Notice:** for this use case, [wayland-debug](https://github.com/wmww/wayland-debug) is a better
 alternative that features a CLI for viewing, filtering, and setting breakpoints on Wayland protocol
