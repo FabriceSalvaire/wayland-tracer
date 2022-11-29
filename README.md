@@ -5,6 +5,7 @@ Forked from https://github.com/dboyan/wayland-tracer Boyan Ding, 2014
 * updated this readme
 * replaced Autotools by Meson
 * upgraded Wayland source files
+* code indentation `indent -l 100 -br -npcs -i4 -nut`
 * code cleanup (modern C)
 * improved output readability (ANSI colours, split messages)
 * tested on 2022/11
