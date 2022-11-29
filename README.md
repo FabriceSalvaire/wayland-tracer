@@ -14,7 +14,10 @@ Forked from https://github.com/dboyan/wayland-tracer Boyan Ding, 2014
 between the compositor and client, which can be useful for debugging. **It can dump raw binary
 data** or interpret data to readable format if XML protocol definitions are provided.
 
-**Notice:** this tool can act as a man in the middle between the Wayland Compositor and a client.
+**Notice:** this tool acts as a man in the middle between the Wayland Compositor and a client.
+
+**Notice:** this tool will log all the message sent by the compositor.  **Take care, a client could
+silently ignore unknown messages when you run it with `WAYLAND_DEBUG=1`**.
 
 ## Building wayland-tracer
 
