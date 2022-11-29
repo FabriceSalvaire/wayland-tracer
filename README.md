@@ -5,6 +5,8 @@ Forked from https://github.com/dboyan/wayland-tracer Boyan Ding, 2014
 * upgraded Wayland source files
 * replaced Autotools by Meson
 * updated this readme
+* code cleanup (modern C)
+* improved output readability (ANSI colours, split messages)
 
 ## What is wayland-tracer
 
@@ -13,15 +15,6 @@ between the compositor and client, which can be useful for debugging. **It can d
 data** or interpret data to readable format if XML protocol definitions are provided.
 
 **Notice:** this tool can act as a man in the middle between the Wayland Compositor and a client.
-
-**Notice:** as far I know, it is the only tool to dump Wire protocol at binary level.
-
-**WARNING: the readable mode similar to WAYLAND_DEBUG=1 requires up to date XML...** See this
-[issue](https://github.com/dboyan/wayland-tracer/issues/1)
-
-**Notice:** for this use case, [wayland-debug](https://github.com/wmww/wayland-debug) is a better
-alternative that features a CLI for viewing, filtering, and setting breakpoints on Wayland protocol
-messages.
 
 ## Building wayland-tracer
 
@@ -56,6 +49,21 @@ $ wayland-tracer -d wayland.xml [-d more-protocols] \
 ```
 
 wayland-tracer will interpret the protocol according to xml definition.
+
+**Warning:** you should specify all the protocols used by the client else it could crash.
+
+This behaviour is related to the file descriptor handling in messages, see this
+[issue](https://github.com/dboyan/wayland-tracer/issues/1) for more details.
+
+You can run this command to guess which protocols are used by a client:
+```
+WAYLAND_DEBUG=1 wayland_client 2>&1 | sed -e 's/.*\] //;s/@.*//;s/ -> //' | sort | uniq
+```
+It will list all the objects involved in the communication, then it is up to you to found the relevant protocol.
+
+You can obtain the protocol XML files in the source code of
+[wayland-debug](https://github.com/wmww/wayland-debug) which a CLI for viewing, filtering, and
+setting breakpoints on Wayland protocol messages.
 
 For more uses (such as server-mode, output redirecting, etc.), see the output of `wayland-tracer -h`
 or `man wayland-tracer`.
