@@ -69,6 +69,7 @@ struct tracer_socket
 };
 
 /**************************************************************************************************/
+/**************************************************************************************************/
 
 void
 tracer_print(struct tracer *tracer, const char *fmt, ...)
@@ -128,6 +129,7 @@ tracer_log_end_impl(struct tracer_instance *instance)
     fflush(tracer->outfp);
 }
 
+/**************************************************************************************************/
 /**************************************************************************************************/
 
 // The following two functions are taken from wayland-client.c
@@ -212,6 +214,143 @@ tracer_connect_server(const char *name)
 
 /**************************************************************************************************/
 
+static int
+tracer_epoll_add_fd(struct tracer *tracer, int fd, void *userdata)
+{
+    struct epoll_event ev;
+    ev.events = EPOLLIN;
+    ev.data.ptr = userdata;
+
+    // watch fd for incoming event
+    return epoll_ctl(tracer->epollfd, EPOLL_CTL_ADD, fd, &ev);
+}
+
+/**************************************************************************************************/
+/**************************************************************************************************/
+
+// For server mode
+//   Following two functions adapted from wayland-server.c
+
+static int
+get_socket_lock(struct tracer_socket *socket)
+{
+    struct stat socket_stat;
+    int fd_lock;
+
+    snprintf(socket->lock_addr, sizeof socket->lock_addr,
+             "%s%s", socket->addr.sun_path, LOCK_SUFFIX);
+
+    fd_lock = open(socket->lock_addr, O_CREAT | O_CLOEXEC, (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP));
+
+    if (fd_lock < 0) {
+        fprintf(stderr, "unable to open lockfile %s check permissions\n", socket->lock_addr);
+        return -1;
+    }
+
+    if (flock(fd_lock, LOCK_EX | LOCK_NB) < 0) {
+        fprintf(stderr, "unable to lock lockfile %s, maybe another compositor is running\n",
+                socket->lock_addr);
+        close(fd_lock);
+        return -1;
+    }
+
+    if (stat(socket->addr.sun_path, &socket_stat) < 0) {
+        if (errno != ENOENT) {
+            fprintf(stderr, "did not manage to stat file %s\n", socket->addr.sun_path);
+            close(fd_lock);
+            return -1;
+        }
+    }
+    else if (socket_stat.st_mode & S_IWUSR || socket_stat.st_mode & S_IWGRP) {
+        unlink(socket->addr.sun_path);
+    }
+
+    return fd_lock;
+}
+
+static int
+tracer_create_socket(struct tracer *tracer, const char *name)
+{
+    struct tracer_socket *s;
+    socklen_t size;
+    int name_size;
+    const char *runtime_dir;
+
+    s = malloc(sizeof *s);
+    if (s == NULL)
+        return -1;
+
+    runtime_dir = getenv("XDG_RUNTIME_DIR");
+    if (!runtime_dir) {
+        wl_log("error: XDG_RUNTIME_DIR not set in the environment\n");
+
+        /* to prevent programs reporting
+         * "failed to add socket: Success" */
+        errno = ENOENT;
+        return -1;
+    }
+
+    s->fd = wl_os_socket_cloexec(PF_LOCAL, SOCK_STREAM, 0);
+    if (s->fd < 0)
+        return -1;
+
+    if (name == NULL)
+        name = getenv("WAYLAND_DISPLAY");
+    if (name == NULL)
+        name = "wayland-0";
+
+    memset(&s->addr, 0, sizeof s->addr);
+    s->addr.sun_family = AF_LOCAL;
+    name_size = snprintf(s->addr.sun_path, sizeof s->addr.sun_path, "%s/%s", runtime_dir, name) + 1;
+
+    assert(name_size > 0);
+    if (name_size > (int) sizeof s->addr.sun_path) {
+        fprintf(stderr, "error: socket path \"%s/%s\" plus null "
+                "terminator exceeds 108 bytes\n", runtime_dir, name);
+        close(s->fd);
+        free(s);
+        /* to prevent programs reporting
+         * "failed to add socket: Success" */
+        errno = ENAMETOOLONG;
+        return -1;
+    };
+
+    s->fd_lock = get_socket_lock(s);
+    if (s->fd_lock < 0) {
+        close(s->fd);
+        free(s);
+        return -1;
+    }
+
+    size = offsetof(struct sockaddr_un, sun_path) + name_size;
+    if (bind(s->fd, (struct sockaddr *) &s->addr, size) < 0) {
+        fprintf(stderr, "bind() failed with error: %m\n");
+        close(s->fd);
+        unlink(s->lock_addr);
+        close(s->fd_lock);
+        free(s);
+        return -1;
+    }
+
+    if (listen(s->fd, 1) < 0) {
+        fprintf(stderr, "listen() failed with error: %m\n");
+        unlink(s->addr.sun_path);
+        close(s->fd);
+        unlink(s->lock_addr);
+        close(s->fd_lock);
+        free(s);
+        return -1;
+    }
+
+    tracer_epoll_add_fd(tracer, s->fd, NULL);
+    tracer->socket = s;
+
+    return 0;
+}
+
+/**************************************************************************************************/
+/**************************************************************************************************/
+
 static struct tracer_connection *
 tracer_connection_create(int fd, int side)
 {
@@ -244,18 +383,6 @@ tracer_connection_destroy(struct tracer_connection *connection)
 }
 
 /**************************************************************************************************/
-
-static int
-tracer_epoll_add_fd(struct tracer *tracer, int fd, void *userdata)
-{
-    struct epoll_event ev;
-    ev.events = EPOLLIN;
-    ev.data.ptr = userdata;
-
-    // watch fd for incoming event
-    return epoll_ctl(tracer->epollfd, EPOLL_CTL_ADD, fd, &ev);
-}
-
 /**************************************************************************************************/
 
 static int
@@ -395,289 +522,6 @@ tracer_handle_client(struct tracer *tracer)
 }
 
 /**************************************************************************************************/
-
-// Tracer event loop
-//   called from main
-static int
-tracer_run(struct tracer *tracer)
-{
-    struct epoll_event ev;
-    struct tracer_connection *connection;
-    int nfds;
-
-    // event loop
-    for (;;) {
-        // Wait for a new event
-        nfds = epoll_wait(tracer->epollfd, &ev, 1, -1);
-
-        if (nfds < 0) {
-            fprintf(stderr, "Failed to poll: %m\n");
-            return -1;
-        }
-
-        // event can comes from the compositor and the client
-        connection = (struct tracer_connection *) ev.data.ptr;
-
-        if (ev.events & EPOLLIN) {
-            // server mode ???
-            if (connection == NULL)
-                tracer_handle_client(tracer);
-            else
-                tracer_handle_data(connection);
-        }
-
-        if (ev.events & EPOLLHUP) {
-            tracer_handle_hup(connection);
-
-            if (tracer->socket == NULL) {
-                fprintf(stderr, "Child hups, exiting\n");
-                break;
-            }
-        }
-    }
-
-    return 0;
-}
-
-/**************************************************************************************************/
-
-// Following two functions adapted from wayland-server.c
-static int
-get_socket_lock(struct tracer_socket *socket)
-{
-    struct stat socket_stat;
-    int fd_lock;
-
-    snprintf(socket->lock_addr, sizeof socket->lock_addr,
-             "%s%s", socket->addr.sun_path, LOCK_SUFFIX);
-
-    fd_lock = open(socket->lock_addr, O_CREAT | O_CLOEXEC, (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP));
-
-    if (fd_lock < 0) {
-        fprintf(stderr, "unable to open lockfile %s check permissions\n", socket->lock_addr);
-        return -1;
-    }
-
-    if (flock(fd_lock, LOCK_EX | LOCK_NB) < 0) {
-        fprintf(stderr, "unable to lock lockfile %s, maybe another compositor is running\n",
-                socket->lock_addr);
-        close(fd_lock);
-        return -1;
-    }
-
-    if (stat(socket->addr.sun_path, &socket_stat) < 0) {
-        if (errno != ENOENT) {
-            fprintf(stderr, "did not manage to stat file %s\n", socket->addr.sun_path);
-            close(fd_lock);
-            return -1;
-        }
-    }
-    else if (socket_stat.st_mode & S_IWUSR || socket_stat.st_mode & S_IWGRP) {
-        unlink(socket->addr.sun_path);
-    }
-
-    return fd_lock;
-}
-
-/**************************************************************************************************/
-
-// for server mode
-static int
-tracer_create_socket(struct tracer *tracer, const char *name)
-{
-    struct tracer_socket *s;
-    socklen_t size;
-    int name_size;
-    const char *runtime_dir;
-
-    s = malloc(sizeof *s);
-    if (s == NULL)
-        return -1;
-
-    runtime_dir = getenv("XDG_RUNTIME_DIR");
-    if (!runtime_dir) {
-        wl_log("error: XDG_RUNTIME_DIR not set in the environment\n");
-
-        /* to prevent programs reporting
-         * "failed to add socket: Success" */
-        errno = ENOENT;
-        return -1;
-    }
-
-    s->fd = wl_os_socket_cloexec(PF_LOCAL, SOCK_STREAM, 0);
-    if (s->fd < 0)
-        return -1;
-
-    if (name == NULL)
-        name = getenv("WAYLAND_DISPLAY");
-    if (name == NULL)
-        name = "wayland-0";
-
-    memset(&s->addr, 0, sizeof s->addr);
-    s->addr.sun_family = AF_LOCAL;
-    name_size = snprintf(s->addr.sun_path, sizeof s->addr.sun_path, "%s/%s", runtime_dir, name) + 1;
-
-    assert(name_size > 0);
-    if (name_size > (int) sizeof s->addr.sun_path) {
-        fprintf(stderr, "error: socket path \"%s/%s\" plus null "
-                "terminator exceeds 108 bytes\n", runtime_dir, name);
-        close(s->fd);
-        free(s);
-        /* to prevent programs reporting
-         * "failed to add socket: Success" */
-        errno = ENAMETOOLONG;
-        return -1;
-    };
-
-    s->fd_lock = get_socket_lock(s);
-    if (s->fd_lock < 0) {
-        close(s->fd);
-        free(s);
-        return -1;
-    }
-
-    size = offsetof(struct sockaddr_un, sun_path) + name_size;
-    if (bind(s->fd, (struct sockaddr *) &s->addr, size) < 0) {
-        fprintf(stderr, "bind() failed with error: %m\n");
-        close(s->fd);
-        unlink(s->lock_addr);
-        close(s->fd_lock);
-        free(s);
-        return -1;
-    }
-
-    if (listen(s->fd, 1) < 0) {
-        fprintf(stderr, "listen() failed with error: %m\n");
-        unlink(s->addr.sun_path);
-        close(s->fd);
-        unlink(s->lock_addr);
-        close(s->fd_lock);
-        free(s);
-        return -1;
-    }
-
-    tracer_epoll_add_fd(tracer, s->fd, NULL);
-    tracer->socket = s;
-
-    return 0;
-}
-
-/**************************************************************************************************/
-
-static void
-usage(void)
-{
-    fprintf(stderr, "wayland-tracer: a wayland protocol dumper\n"
-            "Usage:\twayland-tracer [OPTIONS] -- file ...\n"
-            "\twayland-tracer -S NAME [OPTIONS]\n\n"
-            "Options:\n\n"
-            "  -S NAME\t\tMake wayland-tracer run under server mode\n"
-            "\t\t\tand make the name of server socket NAME (such as\n"
-            "\t\t\twayland-0)\n"
-            "  -o FILE\t\tDump output to FILE\n"
-            "  -d FILE\t\tAdd an xml protocol file\n"
-            "\t\t\twayland-tracer will output readable format according\n"
-            "\t\t\tto the protocols given if -d is specified\n" "  -h\t\t\tThis help message\n\n");
-}
-
-/**************************************************************************************************/
-
-static int
-tracer_add_protocol(struct tracer_options *options, const char *file)
-{
-    struct protocol_file *protocol_file;
-
-    protocol_file = malloc(sizeof *protocol_file);
-    if (protocol_file == NULL) {
-        fprintf(stderr, "Failed to alloc for protocol: %m\n");
-        return -1;
-    }
-
-    protocol_file->loc = file;
-    wl_list_insert(&options->protocol_file_list, &protocol_file->link);
-
-    return 0;
-}
-
-/**************************************************************************************************/
-
-static struct tracer_options *
-tracer_parse_args(int argc, char *argv[])
-{
-    int i;
-    struct tracer_options *options;
-
-    options = malloc(sizeof *options);
-    if (options == NULL) {
-        errno = ENOMEM;
-        return NULL;
-    }
-
-    options->spawn_args = NULL;
-    options->mode = TRACER_MODE_SINGLE;
-    wl_list_init(&options->protocol_file_list);
-    options->output_format = TRACER_OUTPUT_RAW;
-
-    if (argc == 1) {
-        usage();
-        exit(EXIT_SUCCESS);
-    }
-
-    for (i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-h")) {
-            usage();
-            exit(EXIT_SUCCESS);
-        }
-        else if (!strcmp(argv[i], "-S")) {
-            i++;
-            if (i == argc) {
-                fprintf(stderr, "Socket not specified\n");
-                exit(EXIT_FAILURE);
-            }
-            options->mode = TRACER_MODE_SERVER;
-            options->socket = argv[i];
-        }
-        else if (!strcmp(argv[i], "--")) {
-            i++;
-            if (i == argc) {
-                fprintf(stderr, "Program not specified\n");
-                exit(EXIT_FAILURE);
-            }
-            options->spawn_args = &argv[i];
-            break;
-        }
-        else if (!strcmp(argv[i], "-o")) {
-            i++;
-            if (i == argc) {
-                fprintf(stderr, "Output file not specified\n");
-                exit(EXIT_FAILURE);
-            }
-            options->outfile = argv[i];
-        }
-        else if (!strcmp(argv[i], "-d")) {
-            i++;
-            if (i == argc) {
-                fprintf(stderr, "Protocol file not specfied\n");
-                exit(EXIT_FAILURE);
-            }
-            if (tracer_add_protocol(options, argv[i]) != 0)
-                exit(EXIT_FAILURE);
-            options->output_format = TRACER_OUTPUT_INTERPRET;
-        }
-        else {
-            fprintf(stderr, "Unknown argument '%s'\n", argv[i]);
-            usage();
-            exit(EXIT_FAILURE);
-        }
-    }
-
-    if (options->mode == TRACER_MODE_SINGLE && options->spawn_args == NULL) {
-        fprintf(stderr, "No client specified in single mode\n");
-        exit(EXIT_FAILURE);
-    }
-    return options;
-}
-
 /**************************************************************************************************/
 
 static struct tracer *
@@ -808,6 +652,169 @@ tracer_create(struct tracer_options *options)
     close(socket_pair[0]);
     free(tracer);
     return NULL;
+}
+
+/**************************************************************************************************/
+
+// Tracer event loop
+//   called from main
+static int
+tracer_run(struct tracer *tracer)
+{
+    struct epoll_event ev;
+    struct tracer_connection *connection;
+    int nfds;
+
+    // event loop
+    for (;;) {
+        // Wait for a new event
+        nfds = epoll_wait(tracer->epollfd, &ev, 1, -1);
+
+        if (nfds < 0) {
+            fprintf(stderr, "Failed to poll: %m\n");
+            return -1;
+        }
+
+        // event can comes from the compositor and the client
+        connection = (struct tracer_connection *) ev.data.ptr;
+
+        if (ev.events & EPOLLIN) {
+            // server mode ???
+            if (connection == NULL)
+                tracer_handle_client(tracer);
+            else
+                tracer_handle_data(connection);
+        }
+
+        if (ev.events & EPOLLHUP) {
+            tracer_handle_hup(connection);
+
+            if (tracer->socket == NULL) {
+                fprintf(stderr, "Child hups, exiting\n");
+                break;
+            }
+        }
+    }
+
+    return 0;
+}
+
+/**************************************************************************************************/
+/**************************************************************************************************/
+
+static int
+tracer_add_protocol(struct tracer_options *options, const char *file)
+{
+    struct protocol_file *protocol_file;
+
+    protocol_file = malloc(sizeof *protocol_file);
+    if (protocol_file == NULL) {
+        fprintf(stderr, "Failed to alloc for protocol: %m\n");
+        return -1;
+    }
+
+    protocol_file->loc = file;
+    wl_list_insert(&options->protocol_file_list, &protocol_file->link);
+
+    return 0;
+}
+
+/**************************************************************************************************/
+/**************************************************************************************************/
+
+static void
+usage(void)
+{
+    fprintf(stderr, "wayland-tracer: a wayland protocol dumper\n"
+            "Usage:\twayland-tracer [OPTIONS] -- file ...\n"
+            "\twayland-tracer -S NAME [OPTIONS]\n\n"
+            "Options:\n\n"
+            "  -S NAME\t\tMake wayland-tracer run under server mode\n"
+            "\t\t\tand make the name of server socket NAME (such as\n"
+            "\t\t\twayland-0)\n"
+            "  -o FILE\t\tDump output to FILE\n"
+            "  -d FILE\t\tAdd an xml protocol file\n"
+            "\t\t\twayland-tracer will output readable format according\n"
+            "\t\t\tto the protocols given if -d is specified\n" "  -h\t\t\tThis help message\n\n");
+}
+
+/**************************************************************************************************/
+
+static struct tracer_options *
+tracer_parse_args(int argc, char *argv[])
+{
+    int i;
+    struct tracer_options *options;
+
+    options = malloc(sizeof *options);
+    if (options == NULL) {
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    options->spawn_args = NULL;
+    options->mode = TRACER_MODE_SINGLE;
+    wl_list_init(&options->protocol_file_list);
+    options->output_format = TRACER_OUTPUT_RAW;
+
+    if (argc == 1) {
+        usage();
+        exit(EXIT_SUCCESS);
+    }
+
+    for (i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "-h")) {
+            usage();
+            exit(EXIT_SUCCESS);
+        }
+        else if (!strcmp(argv[i], "-S")) {
+            i++;
+            if (i == argc) {
+                fprintf(stderr, "Socket not specified\n");
+                exit(EXIT_FAILURE);
+            }
+            options->mode = TRACER_MODE_SERVER;
+            options->socket = argv[i];
+        }
+        else if (!strcmp(argv[i], "--")) {
+            i++;
+            if (i == argc) {
+                fprintf(stderr, "Program not specified\n");
+                exit(EXIT_FAILURE);
+            }
+            options->spawn_args = &argv[i];
+            break;
+        }
+        else if (!strcmp(argv[i], "-o")) {
+            i++;
+            if (i == argc) {
+                fprintf(stderr, "Output file not specified\n");
+                exit(EXIT_FAILURE);
+            }
+            options->outfile = argv[i];
+        }
+        else if (!strcmp(argv[i], "-d")) {
+            i++;
+            if (i == argc) {
+                fprintf(stderr, "Protocol file not specfied\n");
+                exit(EXIT_FAILURE);
+            }
+            if (tracer_add_protocol(options, argv[i]) != 0)
+                exit(EXIT_FAILURE);
+            options->output_format = TRACER_OUTPUT_INTERPRET;
+        }
+        else {
+            fprintf(stderr, "Unknown argument '%s'\n", argv[i]);
+            usage();
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    if (options->mode == TRACER_MODE_SINGLE && options->spawn_args == NULL) {
+        fprintf(stderr, "No client specified in single mode\n");
+        exit(EXIT_FAILURE);
+    }
+    return options;
 }
 
 /**************************************************************************************************/
