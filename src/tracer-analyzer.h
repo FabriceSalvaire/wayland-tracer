@@ -30,60 +30,58 @@ extern "C"
 {
 #endif
 
-    struct location
-    {
-        const char *filename;
-        int line_number;
-    };
+struct location
+{
+    const char *filename;
+    int line_number;
+};
 
-    struct tracer_message;
+struct tracer_message;
 
-    struct tracer_interface
-    {
-        struct location loc;
-        char *name;
-        int type_index;
-        struct wl_list request_list;
-        struct wl_list event_list;
-        struct wl_list link;
-        struct tracer_message **methods;
-        struct tracer_message **events;
-        int method_count, event_count;
-    };
+struct tracer_interface
+{
+    struct location loc;
+    char *name;
+    int type_index;
+    struct wl_list request_list;
+    struct wl_list event_list;
+    struct wl_list link;
+    struct tracer_message **methods;
+    struct tracer_message **events;
+    int method_count, event_count;
+};
 
-    struct tracer_message
-    {
-        struct location loc;
-        char *name;
-        struct wl_list arg_list;
-        struct wl_list link;
-        int arg_count;
-        int new_id_count;
-        int destructor;
-        char *new_interface_name;
-        struct tracer_interface **types;
-        char *signature;
-    };
+struct tracer_message
+{
+    struct location loc;
+    char *name;
+    struct wl_list arg_list;
+    struct wl_list link;
+    int arg_count;
+    int new_id_count;
+    int destructor;
+    char *new_interface_name;
+    struct tracer_interface **types;
+    char *signature;
+};
 
-    struct parse_context;
+struct parse_context;
 
-    struct tracer_analyzer
-    {
-        struct tracer_interface **interfaces;
-        struct tracer_interface *display_interface;
-        struct parse_context *ctx;
-        struct wl_list interface_list;
-    };
+struct tracer_analyzer
+{
+    struct tracer_interface **interfaces;
+    struct tracer_interface *display_interface;
+    struct parse_context *ctx;
+    struct wl_list interface_list;
+};
 
-    struct tracer_analyzer *tracer_analyzer_create(void);
+struct tracer_analyzer *tracer_analyzer_create(void);
 
-    int tracer_analyzer_add_protocol(struct tracer_analyzer *analyzer, const char *filename);
+int tracer_analyzer_add_protocol(struct tracer_analyzer *analyzer, const char *filename);
 
-    struct tracer_interface **tracer_analyzer_lookup_type(struct tracer_analyzer *analyzer,
-                                                          char *type_name);
+struct tracer_interface **tracer_analyzer_lookup_type(struct tracer_analyzer *analyzer, char *type_name);
 
-    int tracer_analyzer_finalize(struct tracer_analyzer *analyzer);
-
+int tracer_analyzer_finalize(struct tracer_analyzer *analyzer);
 
 #ifdef __cplusplus
 }

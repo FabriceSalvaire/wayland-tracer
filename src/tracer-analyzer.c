@@ -32,6 +32,8 @@
 #include "tracer-analyzer.h"
 #include "wayland-util.h"
 
+/**************************************************************************************************/
+
 #define XML_BUFFER_SIZE 4096
 
 struct tracer_protocol

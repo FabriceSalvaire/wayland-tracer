@@ -45,6 +45,8 @@
 #include "wayland-os.h"
 #include "connection.h"
 
+/**************************************************************************************************/
+
 static inline uint32_t
 div_roundup(uint32_t n, size_t a)
 {
@@ -55,6 +57,8 @@ div_roundup(uint32_t n, size_t a)
     return (uint32_t) (((uint64_t) n + (a - 1)) / a);
 }
 
+/**************************************************************************************************/
+
 // not in vanilla
 /*
 struct wl_ring_buffer
@@ -64,10 +68,14 @@ struct wl_ring_buffer
 };
 */
 
+/**************************************************************************************************/
+
 #define MASK(i) ((i) & 4095)
 
 #define MAX_FDS_OUT	28
 #define CLEN		(CMSG_LEN(MAX_FDS_OUT * sizeof(int32_t)))
+
+/**************************************************************************************************/
 
 // not in vanilla
 /*
@@ -79,6 +87,8 @@ struct wl_connection
     int want_flush;
 };
 */
+
+/**************************************************************************************************/
 
 static int
 ring_buffer_put(struct wl_ring_buffer *b, const void *data, size_t count)
@@ -183,6 +193,8 @@ ring_buffer_size(struct wl_ring_buffer *b)
 {
     return b->head - b->tail;
 }
+
+/**************************************************************************************************/
 
 struct wl_connection *
 wl_connection_create(int fd)
