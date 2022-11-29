@@ -2,11 +2,12 @@
 
 Forked from https://github.com/dboyan/wayland-tracer Boyan Ding, 2014
 
-* upgraded Wayland source files
-* replaced Autotools by Meson
 * updated this readme
+* replaced Autotools by Meson
+* upgraded Wayland source files
 * code cleanup (modern C)
 * improved output readability (ANSI colours, split messages)
+* tested on 2022/11
 
 ## What is wayland-tracer
 
@@ -14,10 +15,12 @@ Forked from https://github.com/dboyan/wayland-tracer Boyan Ding, 2014
 between the compositor and client, which can be useful for debugging. **It can dump raw binary
 data** or interpret data to readable format if XML protocol definitions are provided.
 
-**Notice:** this tool acts as a man in the middle between the Wayland Compositor and a client.
+wayland-tracer acts as a man in the middle between the Wayland Compositor and a client.
 
 **Notice:** this tool will log all the message sent by the compositor.  **Take care, a client could
 silently ignore unknown messages when you run it with `WAYLAND_DEBUG=1`**.
+
+This tool can also be useful to learn and hack the Wayland protocol and Unix domain sockets.
 
 ## Building wayland-tracer
 
