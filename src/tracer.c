@@ -481,6 +481,7 @@ tracer_handle_data(struct tracer_connection *connection)
     struct tracer *tracer = connection->instance->tracer;
     struct tracer_connection *peer = connection->peer;
 
+    // read data on the wire
     int total = wl_connection_read(connection->wl_conn);
 
     struct tracer_instance *instance = connection->instance;
@@ -495,7 +496,6 @@ tracer_handle_data(struct tracer_connection *connection)
         if (size == 0)
             break;
     }
-    // send an acknowledgement ???
     wl_connection_flush(peer->wl_conn);
 }
 

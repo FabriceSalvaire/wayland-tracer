@@ -192,6 +192,7 @@ analyze_protocol(struct tracer_connection *connection,
     tracer_log_end();
 
   finish:
+    // does order mater ???
     wl_connection_write(peer->wl_conn, buf, size);
     wl_connection_consume(connection->wl_conn, size);
 

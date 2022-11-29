@@ -1,5 +1,6 @@
 // Not in vanilla
-// Export private API
+// To export private API
+
 #ifndef CONNECTION_H
 #define CONNECTION_H
 

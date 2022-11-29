@@ -59,6 +59,15 @@ div_roundup(uint32_t n, size_t a)
 
 /**************************************************************************************************/
 
+// This code implements a ring buffer
+//
+// put some data
+//   [<tail>=0 ... <head> 4095]
+// consume some data
+//   [0 <tail> ... <head> 4095]
+// put additional data: buffer wrap
+//   [0 <head> ... <tail> 4095]
+
 // not in vanilla
 /*
 struct wl_ring_buffer
@@ -67,8 +76,6 @@ struct wl_ring_buffer
     uint32_t head, tail;
 };
 */
-
-/**************************************************************************************************/
 
 #define MASK(i) ((i) & 4095)
 
@@ -101,7 +108,9 @@ ring_buffer_put(struct wl_ring_buffer *b, const void *data, size_t count)
         return -1;
     }
 
+    // compute head position within b->data, fast modulo
     head = MASK(b->head);
+    // check if data fit in b->data
     if (head + count <= sizeof b->data) {
         memcpy(b->data + head, data, count);
     }
@@ -195,6 +204,7 @@ ring_buffer_size(struct wl_ring_buffer *b)
 }
 
 /**************************************************************************************************/
+/**************************************************************************************************/
 
 struct wl_connection *
 wl_connection_create(int fd)
@@ -248,12 +258,14 @@ wl_connection_destroy(struct wl_connection *connection)
     return fd;
 }
 
+// Copy data from the input ring buffer
 void
 wl_connection_copy(struct wl_connection *connection, void *data, size_t size)
 {
     ring_buffer_copy(&connection->in, data, size);
 }
 
+// Consume data in the input ring buffer
 void
 wl_connection_consume(struct wl_connection *connection, size_t size)
 {
@@ -290,6 +302,9 @@ decode_cmsg(struct wl_ring_buffer *buffer, struct msghdr *msg)
     size_t size, max, i;
     int overflow = 0;
 
+    // see cmsg_firsthdr(3)
+    // These macros are used to create and access control messages (also called ancillary data)
+    // that are not a part of the socket payload.
     for (cmsg = CMSG_FIRSTHDR(msg); cmsg != NULL; cmsg = CMSG_NXTHDR(msg, cmsg)) {
         if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS)
             continue;
@@ -356,6 +371,7 @@ wl_connection_flush(struct wl_connection *connection)
     return connection->out.head - tail;
 }
 
+// Return the size of pending data in the input ring buffer
 uint32_t
 wl_connection_pending_input(struct wl_connection *connection)
 {
@@ -370,11 +386,13 @@ wl_connection_read(struct wl_connection *connection)
     char cmsg[CLEN];
     int len, count, ret;
 
+    // check ring buffer is not full
     if (ring_buffer_size(&connection->in) >= sizeof(connection->in.data)) {
         errno = EOVERFLOW;
         return -1;
     }
 
+    // setup iov and msg before to read data from socket
     ring_buffer_put_iov(&connection->in, iov, &count);
 
     msg.msg_name = NULL;
@@ -385,6 +403,8 @@ wl_connection_read(struct wl_connection *connection)
     msg.msg_controllen = sizeof cmsg;
     msg.msg_flags = 0;
 
+    // receive data from fd socket
+    //   fill input ring buffer
     do {
         len = wl_os_recvmsg_cloexec(connection->fd, &msg, MSG_DONTWAIT);
     } while (len < 0 && errno == EINTR);
@@ -392,12 +412,15 @@ wl_connection_read(struct wl_connection *connection)
     if (len <= 0)
         return len;
 
+    // decode control message for fds
     ret = decode_cmsg(&connection->fds_in, &msg);
     if (ret)
         return -1;
 
+    // update head (no API for that ???)
     connection->in.head += len;
 
+    // return the amount of data
     return wl_connection_pending_input(connection);
 }
 
