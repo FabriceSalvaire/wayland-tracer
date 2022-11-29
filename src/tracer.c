@@ -1,3 +1,5 @@
+// -*- mode: C; c-basic-offset: 4 -*-
+
 /*
  * Copyright © 2014 Boyan Ding
  *
@@ -20,23 +22,23 @@
  * OF THIS SOFTWARE.
  */
 
+#include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stddef.h>
-#include <stdarg.h>
 #include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <sys/epoll.h>
-#include <sys/types.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/file.h>
+#include <sys/types.h>
 #include <sys/un.h>
-#include <stdint.h>
 #include <time.h>
-#include <errno.h>
-#include <assert.h>
+#include <unistd.h>
 
 #include "wayland-os.h"
 #include "wayland-private.h"
@@ -46,12 +48,16 @@
 #include "frontend-analyze.h"
 #include "frontend-bin.h"
 
+/**************************************************************************************************/
+
 #ifndef UNIX_PATH_MAX
 #define UNIX_PATH_MAX 108
 #endif
 
 #define LOCK_SUFFIX ".lock"
 #define LOCK_SUFFIXLEN 5
+
+/**************************************************************************************************/
 
 /* A simple copy of wl_socket in wayland-server.c */
 struct tracer_socket
@@ -61,6 +67,8 @@ struct tracer_socket
     struct sockaddr_un addr;
     char lock_addr[UNIX_PATH_MAX + LOCK_SUFFIXLEN];
 };
+
+/**************************************************************************************************/
 
 void
 tracer_print(struct tracer *tracer, const char *fmt, ...)
@@ -77,6 +85,8 @@ tracer_vprint(struct tracer *tracer, const char *fmt, va_list ap)
 {
     vfprintf(tracer->outfp, fmt, ap);
 }
+
+/**************************************************************************************************/
 
 void
 tracer_log_impl(struct tracer_instance *instance, const char *fmt, ...)
@@ -118,15 +128,19 @@ tracer_log_end_impl(struct tracer_instance *instance)
     fflush(tracer->outfp);
 }
 
-/* The following two functions are taken from wayland-client.c*/
+/**************************************************************************************************/
+
+// The following two functions are taken from wayland-client.c
+
 static int
 tracer_connect_to_socket(const char *name)
 {
-    struct sockaddr_un addr;
-    socklen_t size;
     const char *runtime_dir;
     int name_size, fd;
+    struct sockaddr_un addr;
+    socklen_t size;
 
+    // XDG_RUNTIME_DIR=/run/user/<UID>
     runtime_dir = getenv("XDG_RUNTIME_DIR");
     if (!runtime_dir) {
         fprintf(stderr, "error: XDG_RUNTIME_DIR not set in the environment.\n");
@@ -141,6 +155,7 @@ tracer_connect_to_socket(const char *name)
     if (name == NULL)
         name = "wayland-0";
 
+    // socket(domain, type | SOCK_CLOEXEC, protocol)
     fd = wl_os_socket_cloexec(PF_LOCAL, SOCK_STREAM, 0);
     if (fd < 0)
         return -1;
@@ -170,6 +185,8 @@ tracer_connect_to_socket(const char *name)
     return fd;
 }
 
+// Connect a Wayland client to a compositor
+//   Check if WAYLAND_SOCKET is defined
 static int
 tracer_connect_server(const char *name)
 {
@@ -192,6 +209,8 @@ tracer_connect_server(const char *name)
 
     return fd;
 }
+
+/**************************************************************************************************/
 
 static struct tracer_connection *
 tracer_connection_create(int fd, int side)
@@ -224,37 +243,41 @@ tracer_connection_destroy(struct tracer_connection *connection)
     free(connection);
 }
 
+/**************************************************************************************************/
+
 static int
 tracer_epoll_add_fd(struct tracer *tracer, int fd, void *userdata)
 {
     struct epoll_event ev;
-
     ev.events = EPOLLIN;
     ev.data.ptr = userdata;
 
+    // watch fd for incoming event
     return epoll_ctl(tracer->epollfd, EPOLL_CTL_ADD, fd, &ev);
 }
+
+/**************************************************************************************************/
 
 static int
 tracer_instance_create(struct tracer *tracer, int clientfd)
 {
     int serverfd;
     struct tracer_instance *instance;
-    /* XXX: Dirty hack, remove it later */
-    struct tracer_analyzer *analyzer;
 
-    analyzer = (struct tracer_analyzer *) tracer->frontend_data;
+    // ??? XXX: Dirty hack, remove it later
+    struct tracer_analyzer *analyzer = (struct tracer_analyzer *) tracer->frontend_data;
     instance = malloc(sizeof *instance);
     if (instance == NULL) {
         errno = ENOMEM;
         return -1;
     }
 
+    // client mode
+    // tracer acts as a client
     if (tracer->socket == NULL)
         serverfd = tracer_connect_server(NULL);
     else
         serverfd = tracer_connect_to_socket(NULL);
-
     if (serverfd < 0)
         goto err_server;
 
@@ -289,6 +312,7 @@ tracer_instance_create(struct tracer *tracer, int clientfd)
     wl_list_insert(&tracer->instance_list, &instance->link);
     return 0;
 
+    // Error Handling
   err_server:
     close(clientfd);
     free(instance);
@@ -301,6 +325,8 @@ tracer_instance_create(struct tracer *tracer, int clientfd)
     return -1;
 }
 
+/**************************************************************************************************/
+
 static void
 tracer_instance_destroy(struct tracer_instance *instance)
 {
@@ -312,29 +338,43 @@ tracer_instance_destroy(struct tracer_instance *instance)
     free(instance);
 }
 
+/**************************************************************************************************/
+
 static void
 tracer_handle_hup(struct tracer_connection *connection)
 {
     tracer_instance_destroy(connection->instance);
 }
 
+/**************************************************************************************************/
+
 static void
 tracer_handle_data(struct tracer_connection *connection)
 {
-    int total, rem, size;
     struct tracer *tracer = connection->instance->tracer;
     struct tracer_connection *peer = connection->peer;
 
-    total = wl_connection_read(connection->wl_conn);
+    int total = wl_connection_read(connection->wl_conn);
 
-    for (rem = total; rem >= 8; rem -= size) {
-        size = tracer->frontend->data(connection, rem);
+    struct tracer_instance *instance = connection->instance;
+    tracer_log("==================================================\n");
+    tracer_log("    \x1b[31mReceived %u bytes\x1b[0m\n", total);
+
+    // buffer can contain more than one message
+    int size;
+    for (int remain = total; remain >= 8; remain -= size) {
+        tracer_log("      \x1b[36mprocess message @%u \x1b[0m\n", remain);
+        size = tracer->frontend->data(connection, remain);
         if (size == 0)
             break;
     }
+    // send an acknowledgement ???
     wl_connection_flush(peer->wl_conn);
 }
 
+/**************************************************************************************************/
+
+// handle a new client ???
 static void
 tracer_handle_client(struct tracer *tracer)
 {
@@ -354,6 +394,10 @@ tracer_handle_client(struct tracer *tracer)
     }
 }
 
+/**************************************************************************************************/
+
+// Tracer event loop
+//   called from main
 static int
 tracer_run(struct tracer *tracer)
 {
@@ -361,7 +405,9 @@ tracer_run(struct tracer *tracer)
     struct tracer_connection *connection;
     int nfds;
 
+    // event loop
     for (;;) {
+        // Wait for a new event
         nfds = epoll_wait(tracer->epollfd, &ev, 1, -1);
 
         if (nfds < 0) {
@@ -369,9 +415,11 @@ tracer_run(struct tracer *tracer)
             return -1;
         }
 
+        // event can comes from the compositor and the client
         connection = (struct tracer_connection *) ev.data.ptr;
 
         if (ev.events & EPOLLIN) {
+            // server mode ???
             if (connection == NULL)
                 tracer_handle_client(tracer);
             else
@@ -391,7 +439,9 @@ tracer_run(struct tracer *tracer)
     return 0;
 }
 
-/* Following two functions adapted from wayland-server.c */
+/**************************************************************************************************/
+
+// Following two functions adapted from wayland-server.c
 static int
 get_socket_lock(struct tracer_socket *socket)
 {
@@ -429,6 +479,9 @@ get_socket_lock(struct tracer_socket *socket)
     return fd_lock;
 }
 
+/**************************************************************************************************/
+
+// for server mode
 static int
 tracer_create_socket(struct tracer *tracer, const char *name)
 {
@@ -509,6 +562,8 @@ tracer_create_socket(struct tracer *tracer, const char *name)
     return 0;
 }
 
+/**************************************************************************************************/
+
 static void
 usage(void)
 {
@@ -524,6 +579,8 @@ usage(void)
             "\t\t\twayland-tracer will output readable format according\n"
             "\t\t\tto the protocols given if -d is specified\n" "  -h\t\t\tThis help message\n\n");
 }
+
+/**************************************************************************************************/
 
 static int
 tracer_add_protocol(struct tracer_options *options, const char *file)
@@ -541,6 +598,8 @@ tracer_add_protocol(struct tracer_options *options, const char *file)
 
     return 0;
 }
+
+/**************************************************************************************************/
 
 static struct tracer_options *
 tracer_parse_args(int argc, char *argv[])
@@ -619,16 +678,15 @@ tracer_parse_args(int argc, char *argv[])
     return options;
 }
 
+/**************************************************************************************************/
+
 static struct tracer *
 tracer_create(struct tracer_options *options)
 {
-    int sock_vec[2], ret;
-    pid_t pid;
-    struct tracer *tracer;
-    char sockfdstr[12];
-    struct protocol_file *file;
+    int rc;
+    int socket_pair[2];
 
-    tracer = malloc(sizeof *tracer);
+    struct tracer *tracer = malloc(sizeof *tracer);
     if (tracer == NULL) {
         errno = ENOMEM;
         return NULL;
@@ -655,41 +713,55 @@ tracer_create(struct tracer_options *options)
     else
         tracer->frontend = &tracer_frontend_bin;
 
-    ret = tracer->frontend->init(tracer);
-    if (ret != 0) {
+    rc = tracer->frontend->init(tracer);
+    if (rc != 0) {
         fprintf(stderr, "Failed to init tracer frontend\n");
         exit(EXIT_FAILURE);
     }
 
     // Spawn child if we're in single mode
+    // compositor <=> tracer <=> client
     if (options->mode == TRACER_MODE_SINGLE) {
         tracer->socket = NULL;
-        ret = socketpair(PF_LOCAL, SOCK_STREAM, 0, sock_vec);
-        if (ret != 0) {
+        // create a socket pair for tracer <=> client communication
+        //   0 is for tracer side
+        //   1 is for client side / WAYLAND_SOCKET
+        rc = socketpair(PF_LOCAL, SOCK_STREAM, 0, socket_pair);
+        if (rc != 0) {
             fprintf(stderr, "Failed to create socketpair: %m\n");
             goto err_socketpair;
         }
 
-        pid = fork();
-        if (pid < 0) {
+        pid_t pid = fork();
+        // child branch
+        if (pid == 0) {
+            // close parent files
+            close(socket_pair[0]);
+            fclose(tracer->outfp);
+
+            // set the wayland socket for the client
+            char sockfdstr[12];
+            sprintf(sockfdstr, "%d", socket_pair[1]);
+            setenv("WAYLAND_SOCKET", sockfdstr, 1);
+            // load client
+            execvp(options->spawn_args[0], options->spawn_args);
+
+            // Only when exec fails can we reach here
+            close(socket_pair[1]);
+            exit(EXIT_FAILURE);
+        }
+        // parent branch
+        // else if (pid > 0) {}
+        // error branch
+        else if (pid == -1) {
             fprintf(stderr, "Failed to fork: %m\n");
             goto err_fork;
         }
 
-        if (pid == 0) {
-            close(sock_vec[0]);
-            fclose(tracer->outfp);
-            sprintf(sockfdstr, "%d", sock_vec[1]);
-            setenv("WAYLAND_SOCKET", sockfdstr, 1);
-
-            execvp(options->spawn_args[0], options->spawn_args);
-
-            // Only when exec fails can we reach here
-            close(sock_vec[1]);
-            exit(EXIT_FAILURE);
-        }
     }
 
+    // Epoll is a Linux syscall to monitor multiple file descriptors
+    // to see whether I/O is possible on any of them.
     tracer->epollfd = epoll_create1(0);
     if (tracer->epollfd < 0) {
         fprintf(stderr, "Failed to create epollfd: %m\n");
@@ -697,69 +769,67 @@ tracer_create(struct tracer_options *options)
     }
 
     if (options->mode == TRACER_MODE_SINGLE) {
-        close(sock_vec[1]);
-        ret = tracer_instance_create(tracer, sock_vec[0]);
-        if (ret < 0) {
+        close(socket_pair[1]); // used by child
+        rc = tracer_instance_create(tracer, socket_pair[0]);
+        if (rc < 0) {
             fprintf(stderr, "Failed to init instance\n");
             goto err_instance;
         }
     }
     else {
-        ret = tracer_create_socket(tracer, "wayland-1");
-        if (ret < 0)
+        rc = tracer_create_socket(tracer, "wayland-1");
+        if (rc < 0)
             exit(EXIT_FAILURE);
     }
 
     return tracer;
 
+    // Error handling
   err_socketpair:
     free(tracer);
     return NULL;
 
   err_fork:
-    close(sock_vec[0]);
-    close(sock_vec[1]);
+    close(socket_pair[0]);
+    close(socket_pair[1]);
     free(tracer);
     return NULL;
 
   err_epoll_create:
     if (options->mode == TRACER_MODE_SINGLE) {
-        close(sock_vec[0]);
-        close(sock_vec[1]);
+        close(socket_pair[0]);
+        close(socket_pair[1]);
     }
     free(tracer);
     return NULL;
 
   err_instance:
     close(tracer->epollfd);
-    close(sock_vec[0]);
+    close(socket_pair[0]);
     free(tracer);
     return NULL;
 }
 
+/**************************************************************************************************/
+
 int
 main(int argc, char *argv[])
 {
-    int ret;
-    struct tracer *tracer;
-    struct tracer_options *options;
-
-    options = tracer_parse_args(argc, argv);
+    struct tracer_options * options = tracer_parse_args(argc, argv);
     if (options == NULL) {
         fprintf(stderr, "Failed to parse command line: %m\n");
         exit(EXIT_FAILURE);
     }
 
-    tracer = tracer_create(options);
-
+    struct tracer *tracer = tracer_create(options);
     if (tracer == NULL) {
         fprintf(stderr, "Failed to create tracer, exiting!\n");
         exit(EXIT_FAILURE);
     }
 
-    ret = tracer_run(tracer);
-
-    if (ret == 0)
+    // Start event loop
+    int rc = tracer_run(tracer);
+    if (rc == 0)
         exit(EXIT_SUCCESS);
     else
         exit(EXIT_FAILURE);
