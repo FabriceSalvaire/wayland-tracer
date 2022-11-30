@@ -2,6 +2,8 @@
 
 Forked from https://github.com/dboyan/wayland-tracer Boyan Ding, 2014
 
+## Changelog
+
 * updated this readme
 * replaced Autotools by Meson
 * upgraded Wayland source files
@@ -22,6 +24,15 @@ wayland-tracer acts as a man in the middle between the Wayland Compositor and a 
 silently ignore unknown messages when you run it with `WAYLAND_DEBUG=1`**.
 
 This tool can also be useful to learn and hack the Wayland protocol and Unix domain sockets.
+
+The source code is written in C and reuses part of the
+[wayland library](https://gitlab.freedesktop.org/wayland/wayland).
+
+See also
+
+* [Wayland debugging extras](https://wayland.freedesktop.org/extras.html)
+* [wayland-debug](https://github.com/wmww/wayland-debug)
+  a CLI for viewing, filtering, and setting breakpoints on Wayland protocol messages.
 
 ## Building wayland-tracer
 
@@ -69,8 +80,7 @@ WAYLAND_DEBUG=1 wayland_client 2>&1 | sed -e 's/.*\] //;s/@.*//;s/ -> //' | sort
 It will list all the objects involved in the communication, then it is up to you to found the relevant protocol.
 
 You can obtain the protocol XML files in the source code of
-[wayland-debug](https://github.com/wmww/wayland-debug) which a CLI for viewing, filtering, and
-setting breakpoints on Wayland protocol messages.
+[wayland-debug](https://github.com/wmww/wayland-debug).
 
 For more uses (such as server-mode, output redirecting, etc.), see the output of `wayland-tracer -h`
 or `man wayland-tracer`.
